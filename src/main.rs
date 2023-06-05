@@ -19,6 +19,7 @@ struct Config {
     acquire_retry: usize,
     refill_success: usize,
     disable_token_bucket: bool,
+    num_workers: usize,
 }
 
 struct Stats {
@@ -190,6 +191,7 @@ fn main() {
         acquire_retry: 2,
         refill_success: 1,
         disable_token_bucket: false,
+        num_workers: 4,
     };
 
     let mut config_disabled = config.clone();
@@ -217,16 +219,20 @@ fn main() {
 
 fn run(config: Config, backends: Vec<bool>) -> Stats {
     let stats = Stats::new();
-    let mut state = State::new(config, backends, stats);
+    let mut state = State::new(config.clone(), backends, stats);
     let start = Instant::now();
     let finish_at = start + Duration::from_secs(200);
-    let worker = Event {
-        ready_at: start,
-        handler: Box::new(ProduceRequest {
-            interval: Duration::from_secs(1),
-        }),
-    };
-    execute(&mut state, vec![worker], finish_at);
+    let mut workers = vec![];
+    for _ in 0..config.num_workers {
+        let worker = Event {
+            ready_at: start,
+            handler: Box::new(ProduceRequest {
+                interval: Duration::from_secs(1),
+            }),
+        };
+        workers.push(worker);
+    }
+    execute(&mut state, workers, finish_at);
     state.stats
 }
 
