@@ -193,13 +193,24 @@ fn main() {
     let mut config_disabled = config.clone();
     config_disabled.disable_token_bucket = true;
 
-    // let backends = vec![true, true, false];
-    // let stats = run(config.clone(), backends);
+    let (amps_with, ratios_with) = generate(config);
+    let (amps_without, ratios_without) = generate(config_disabled);
 
-    let with = generate_amplification(config);
-    let without = generate_amplification(config_disabled);
+    crate::chart::chart(
+        amps_with,
+        amps_without,
+        "Amplification",
+        "Retry Amplification with and without Token Bucket",
+    )
+    .unwrap();
 
-    crate::chart::chart_amplification(with, without).unwrap();
+    crate::chart::chart(
+        ratios_with,
+        ratios_without,
+        "Success Ratio",
+        "Success Ratio with and without Token Bucket",
+    )
+    .unwrap();
 }
 
 fn run(config: Config, backends: Vec<bool>) -> Stats {
@@ -217,7 +228,7 @@ fn run(config: Config, backends: Vec<bool>) -> Stats {
     state.stats
 }
 
-fn generate_amplification(config: Config) -> Vec<f64> {
+fn generate(config: Config) -> (Vec<f64>, Vec<f64>) {
     let scenarios = vec![
         vec![true, true, true],
         vec![false, true, true],
@@ -225,7 +236,8 @@ fn generate_amplification(config: Config) -> Vec<f64> {
         vec![false, false, false],
     ];
 
-    let mut points = Vec::new();
+    let mut amps = Vec::new();
+    let mut ratios = Vec::new();
     for scenario in scenarios {
         let stats = run(config.clone(), scenario.clone());
         let op_success = stats.get("op_success");
@@ -235,10 +247,12 @@ fn generate_amplification(config: Config) -> Vec<f64> {
         let op_total = op_success + op_failure;
         let client_total = client_success + client_failure;
         let amplification = (op_total as f64) / (client_total as f64);
-        points.push(amplification);
+        let success_ratio = (client_success as f64) / (client_total as f64);
+        amps.push(amplification);
+        ratios.push(success_ratio);
     }
 
-    points
+    (amps, ratios)
 }
 
 fn print_stats(stats: Stats) {
