@@ -81,7 +81,7 @@ struct ProduceRequest {
 
 impl Handler<State> for ProduceRequest {
     fn call(&self, now: Instant, state: &mut State) -> Vec<Event<State>> {
-        vec![self.next_interval(now), self.request(now, state)]
+        vec![self.request(now, state)]
     }
 }
 
@@ -109,6 +109,7 @@ impl ProduceRequest {
                 target,
                 retry_target,
                 state: RequestState::Sending,
+                worker: self.clone(),
             }),
         }
     }
@@ -119,6 +120,7 @@ struct Request {
     target: usize,
     retry_target: usize,
     state: RequestState,
+    worker: ProduceRequest,
 }
 
 #[derive(PartialEq, Eq, Debug, Clone)]
@@ -137,7 +139,7 @@ impl Handler<State> for Request {
                     state.stats.incr("op_success");
                     state.stats.incr("client_success");
                     state.token_bucket.release(state.config.refill_success);
-                    return vec![];
+                    return vec![self.worker.next_interval(now)];
                 } else {
                     state.stats.incr("op_failure");
                 }
@@ -154,7 +156,7 @@ impl Handler<State> for Request {
                 }
 
                 state.stats.incr("client_failure");
-                vec![]
+                vec![self.worker.next_interval(now)]
             }
             Backoff => {
                 let mut cloned = self.clone();
@@ -169,11 +171,11 @@ impl Handler<State> for Request {
                 if state.backends[self.retry_target] {
                     state.stats.incr("op_success");
                     state.stats.incr("client_success");
-                    return vec![];
+                    return vec![self.worker.next_interval(now)];
                 }
                 state.stats.incr("op_failure");
                 state.stats.incr("client_failure");
-                vec![]
+                vec![self.worker.next_interval(now)]
             }
         }
     }
