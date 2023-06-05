@@ -20,6 +20,7 @@ struct Config {
     refill_success: usize,
     disable_token_bucket: bool,
     num_workers: usize,
+    worker_interval: Duration,
 }
 
 struct Stats {
@@ -192,6 +193,7 @@ fn main() {
         refill_success: 1,
         disable_token_bucket: false,
         num_workers: 4,
+        worker_interval: Duration::from_secs(1),
     };
 
     let mut config_disabled = config.clone();
@@ -227,7 +229,7 @@ fn run(config: Config, backends: Vec<bool>) -> Stats {
         let worker = Event {
             ready_at: start,
             handler: Box::new(ProduceRequest {
-                interval: Duration::from_secs(1),
+                interval: config.worker_interval,
             }),
         };
         workers.push(worker);
