@@ -1,3 +1,4 @@
+mod chart;
 mod sim;
 mod token_bucket;
 
@@ -9,6 +10,7 @@ use rand::Rng;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
+#[derive(PartialEq, Eq, Debug, Clone)]
 struct Config {
     backoff: Duration,
     latency: Duration,
@@ -16,6 +18,7 @@ struct Config {
     bucket_size: usize,
     acquire_retry: usize,
     refill_success: usize,
+    disable_token_bucket: bool,
 }
 
 struct Stats {
@@ -139,7 +142,9 @@ impl Handler<State> for Request {
                     state.stats.incr("op_failure");
                 }
 
-                if state.token_bucket.acquire(state.config.acquire_retry) {
+                if state.token_bucket.acquire(state.config.acquire_retry)
+                    || state.config.disable_token_bucket
+                {
                     let mut cloned = self.clone();
                     cloned.state = RequestState::Backoff;
                     return vec![Event {
@@ -182,9 +187,23 @@ fn main() {
         bucket_size: 2,
         acquire_retry: 2,
         refill_success: 1,
+        disable_token_bucket: false,
     };
+
+    let mut config_disabled = config.clone();
+    config_disabled.disable_token_bucket = true;
+
+    // let backends = vec![true, true, false];
+    // let stats = run(config.clone(), backends);
+
+    let with = generate_amplification(config);
+    let without = generate_amplification(config_disabled);
+
+    crate::chart::chart_amplification(with, without).unwrap();
+}
+
+fn run(config: Config, backends: Vec<bool>) -> Stats {
     let stats = Stats::new();
-    let backends = vec![true, true, false];
     let mut state = State::new(config, backends, stats);
     let start = Instant::now();
     let finish_at = start + Duration::from_secs(200);
@@ -195,15 +214,43 @@ fn main() {
         }),
     };
     execute(&mut state, vec![worker], finish_at);
+    state.stats
+}
+
+fn generate_amplification(config: Config) -> Vec<f64> {
+    let scenarios = vec![
+        vec![true, true, true],
+        vec![false, true, true],
+        vec![false, false, true],
+        vec![false, false, false],
+    ];
+
+    let mut points = Vec::new();
+    for scenario in scenarios {
+        let stats = run(config.clone(), scenario.clone());
+        let op_success = stats.get("op_success");
+        let op_failure = stats.get("op_failure");
+        let client_success = stats.get("client_success");
+        let client_failure = stats.get("client_failure");
+        let op_total = op_success + op_failure;
+        let client_total = client_success + client_failure;
+        let amplification = (op_total as f64) / (client_total as f64);
+        points.push(amplification);
+    }
+
+    points
+}
+
+fn print_stats(stats: Stats) {
     println!("--- stats ---");
-    for (name, count) in state.stats.counters.iter() {
+    for (name, count) in stats.counters.iter() {
         println!("{}:\t{}", name, count)
     }
     println!("--- aggregate ---");
-    let op_success = state.stats.get("op_success");
-    let op_failure = state.stats.get("op_failure");
-    let client_success = state.stats.get("client_success");
-    let client_failure = state.stats.get("client_failure");
+    let op_success = stats.get("op_success");
+    let op_failure = stats.get("op_failure");
+    let client_success = stats.get("client_success");
+    let client_failure = stats.get("client_failure");
     let op_total = op_success + op_failure;
     let client_total = client_success + client_failure;
     let success_ratio = (client_success as f64) / (client_total as f64);
